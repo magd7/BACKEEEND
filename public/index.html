@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Project</title>
+    <style>
+        /* Your existing CSS styles */
+    </style>
+</head>
+<body>
+
+    <div id="pdf-container">
+        <div id="left-side">
+            <div id="pdf-pages"></div>
+        </div>
+        <div id="right-side">
+            <input type="file" id="pdf-upload" accept="application/pdf" />
+            <select id="language-select">
+                <option value="ara">Arabic</option>
+                <option value="eng">English</option>
+            </select>
+            <button id="ocr-all-btn">Process All Pages</button>
+            <div id="ocr-loader" style="display:none;">Processing: 0%</div>
+            <div id="all-ocr-output">Output of all pages will appear here.</div>
+            <button id="copy-all-output-btn">Copy All Output</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.7.570/pdf.min.js"></script>
+    <script>
+        const fileInput = document.getElementById('pdf-upload');
+        const pdfPagesContainer = document.getElementById('pdf-pages');
+        const ocrAllBtn = document.getElementById('ocr-all-btn');
+        const languageSelect = document.getElementById('language-select');
+        const allOcrOutputDiv = document.getElementById('all-ocr-output');
+        const ocrLoader = document.getElementById('ocr-loader');
+        const copyAllOutputBtn = document.getElementById('copy-all-output-btn');
+        let pdfDoc = null;
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.7.570/pdf.worker.min.js';
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && file.type === 'application/pdf') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const arrayBuffer = e.target.result;
+                    pdfjsLib.getDocument({ data: arrayBuffer }).promise.then(pdf => {
+                        pdfDoc = pdf;
+                        displayPagesSequentially();
+                    }).catch(error => {
+                        alert('Error loading PDF: ' + error.message);
+                    });
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                alert('Please upload a valid PDF file.');
+            }
+        });
+
+        async function displayPagesSequentially() {
+            pdfPagesContainer.innerHTML = ''; 
+            for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+                const page = await pdfDoc.getPage(pageNum);
+                await renderPage(pageNum, page); 
+            }
+        }
+
+        async function renderPage(pageNum, page) {
+            const scale = 1.5;
+            const viewport = page.getViewport({ scale });
+
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            const renderContext = {
+                canvasContext: context,
+                viewport: viewport
+            };
+
+            await page.render(renderContext).promise;
+
+            const base64Image = canvas.toDataURL('image/jpeg');
+
+            const pageContainer = document.createElement('div');
+            pageContainer.classList.add('page-container');
+
+            const ocrButton = document.createElement('button');
+            ocrButton.textContent = `Process Page ${pageNum}`;
+            ocrButton.addEventListener('click', () => performOCR(base64Image, pageNum));
+
+            const ocrOutputDiv = document.createElement('div');
+            ocrOutputDiv.id = `ocr-output-${pageNum}`;
+            ocrOutputDiv.classList.add('ocr-output');
+            ocrOutputDiv.textContent = "Output will appear here.";
+
+            pageContainer.appendChild(canvas);
+            pageContainer.appendChild(ocrButton);
+            pageContainer.appendChild(ocrOutputDiv);
+            pdfPagesContainer.appendChild(pageContainer);
+        }
+
+        async function performOCR(base64Image, pageNum) {
+            const ocrOutputDiv = document.getElementById(`ocr-output-${pageNum}`);
+            ocrOutputDiv.textContent = "Processing...";
+
+            const language = languageSelect.value;
+
+            try {
+                const response = await fetch('/perform-ocr', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        base64Image: base64Image,
+                        language: language
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    ocrOutputDiv.textContent = 'Error during OCR: ' + data.error;
+                } else {
+                    ocrOutputDiv.textContent = data.parsedText || 'No text found.';
+                }
+            } catch (error) {
+                console.error('Error during OCR:', error);
+                ocrOutputDiv.textContent = 'Error during OCR. Please try again.';
+            }
+        }
+    </script>
+</body>
+</html>
